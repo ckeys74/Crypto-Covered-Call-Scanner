@@ -77,3 +77,12 @@ def scan_asset(asset: str):
     return results
 if not top_strategies:
     return {"ticker": ticker, "current_price": float(current_price), "expiration": target_exp, "top_strategies": [], "message": "No suitable OTM calls found"}
+@app.get("/")
+def home():
+    return {
+        "welcome": "Crypto ETF Covered Call Scanner",
+        "instructions": "Use /scan/BTC, /scan/XRP, etc. or visit /docs for interactive testing.",
+        "docs_url": "/docs",
+        "example": "https://your-url.onrender.com/scan/BTC"
+    }
+    
