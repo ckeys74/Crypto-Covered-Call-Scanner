@@ -75,3 +75,5 @@ def scan_asset(asset: str):
         results[tick] = get_covered_call_strategies(tick)
     
     return results
+if not top_strategies:
+    return {"ticker": ticker, "current_price": float(current_price), "expiration": target_exp, "top_strategies": [], "message": "No suitable OTM calls found"}
