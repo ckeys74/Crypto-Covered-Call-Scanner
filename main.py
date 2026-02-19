@@ -6,26 +6,25 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Crypto ETF Covered Call Scanner")
 
-# Enable CORS so Kajabi (or any frontend) can fetch data
+# Enable CORS for Kajabi frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to your Kajabi domain later for better security
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ETF mapping by asset
+# ETF mapping
 crypto_etfs = {
     'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB', 'HODL', 'EZBC', 'BTCW', 'YBTC', 'BTCI'],
     'ETH': ['ETHA', 'FETH', 'ETHV', 'ETHE', 'YETH', 'EHY'],
     'SOL': ['BSOL', 'GSOL', 'SOL', 'SOLM', 'SOLC'],
     'XRP': ['GXRP', 'XRPZ', 'TOXR', 'XRP', 'XRPM'],
-    'ADA': [],  # Pending
+    'ADA': [],
     'HBAR': ['HBR'],
     'LTC': ['LTCC'],
-    'DOGE': [],  # Pending
-    # Add more assets here as needed
+    'DOGE': [],
 }
 
 def get_covered_call_strategies(ticker: str):
@@ -33,15 +32,14 @@ def get_covered_call_strategies(ticker: str):
         etf = yf.Ticker(ticker)
         history = etf.history(period='1d')
         if history.empty:
-            return {"error": f"No price data available for {ticker}."}
+            return {"error": f"No price data for {ticker}."}
         
         current_price = history['Close'].iloc[-1]
         expirations = etf.options
         
         if not expirations:
-            return {"error": f"No options available for {ticker}."}
+            return {"error": f"No options for {ticker}."}
         
-        # Find nearest monthly expiration (20-40 days)
         today = datetime.now()
         target_exp = None
         for exp in expirations:
@@ -52,12 +50,12 @@ def get_covered_call_strategies(ticker: str):
                 break
         
         if not target_exp:
-            return {"error": f"No near-monthly expiration found for {ticker}."}
+            return {"error": f"No near-monthly expiration for {ticker}."}
         
         opt_chain = etf.option_chain(target_exp)
         calls = opt_chain.calls
         
-        # Filter out-of-the-money (OTM) calls
+        # Filter OTM calls
         otm_calls = calls[calls['strike'] > current_price].copy()
         
         if otm_calls.empty:
@@ -66,19 +64,33 @@ def get_covered_call_strategies(ticker: str):
                 "current_price": float(current_price),
                 "expiration": target_exp,
                 "top_strategies": [],
-                "message": "No suitable OTM calls found for this expiration."
+                "message": "No OTM calls found."
             }
         
-        # Calculate potential return if call is executed
-        otm_calls['premium'] = otm_calls['lastPrice'].fillna((otm_calls['bid'] + otm_calls['ask']) / 2)
+        # Use lastPrice if available, otherwise bid (never use ask or midpoint)
+        otm_calls['premium'] = otm_calls['lastPrice']
+        otm_calls['premium'] = otm_calls['premium'].fillna(otm_calls['bid'])
+        
+        # Drop rows where premium is zero or NaN (no real sell price)
+        otm_calls = otm_calls[otm_calls['premium'] > 0].dropna(subset=['premium'])
+        
+        if otm_calls.empty:
+            return {
+                "ticker": ticker,
+                "current_price": float(current_price),
+                "expiration": target_exp,
+                "top_strategies": [],
+                "message": "No calls with positive bid/last price."
+            }
+        
+        # Sort by strike (closest first) and take top 5
+        otm_calls = otm_calls.sort_values('strike', ascending=True).head(5)
+        
+        # Calculate return %
         otm_calls['cap_gain'] = otm_calls['strike'] - current_price
         otm_calls['total_return_pct'] = ((otm_calls['premium'] + otm_calls['cap_gain']) / current_price) * 100
-        otm_calls['monthly_annualized'] = otm_calls['total_return_pct'] * (30 / days_to_exp)
         
-        # Get top 5 by highest potential return
-        top_strategies = otm_calls.sort_values('total_return_pct', ascending=False).head(5)[
-            ['strike', 'premium', 'impliedVolatility', 'total_return_pct']
-        ].to_dict(orient='records')
+        top_strategies = otm_calls[['strike', 'premium', 'impliedVolatility', 'total_return_pct']].to_dict(orient='records')
         
         return {
             "ticker": ticker,
@@ -94,7 +106,7 @@ def get_covered_call_strategies(ticker: str):
 def scan_asset(asset: str):
     tickers = crypto_etfs.get(asset.upper(), [])
     if not tickers:
-        return {"error": f"No ETFs found for asset '{asset}'."}
+        return {"error": f"No ETFs for '{asset}'."}
     
     results = {}
     for tick in tickers:
@@ -102,14 +114,11 @@ def scan_asset(asset: str):
     
     return results
 
-# Simple welcome page at root URL (no more 404)
 @app.get("/")
 def home():
     return {
         "title": "Crypto ETF Covered Call Scanner API",
-        "description": "Scan covered call strategies for crypto ETFs (BTC, ETH, SOL, XRP, etc.)",
-        "usage": "Use /scan/BTC, /scan/XRP, /scan/SOL, etc.",
-        "interactive_docs": "/docs (click here to test interactively)",
-        "example": "/scan/BTC"
+        "message": "Welcome! Use /scan/BTC, /scan/XRP, etc.",
+        "docs": "/docs"
     }
     
