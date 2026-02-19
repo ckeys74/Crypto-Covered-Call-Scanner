@@ -1,3 +1,16 @@
+from fastapi import FastAPI, Request
+from datetime import datetime, timedelta
+from functools import lru_cache
+from functools import lru_cache
+
+@lru_cache(maxsize=32)  # Cache up to 32 asset results
+def cached_scan(asset: str):
+    return scan_asset(asset)
+
+@app.get("/scan/{asset}")
+def scan_asset(asset: str):
+    # ... your existing code ...
+    return cached_scan(asset.upper())
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
