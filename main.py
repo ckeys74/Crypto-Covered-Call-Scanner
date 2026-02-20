@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,9 +17,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Asset groups (BTC reduced to top 3 ETFs)
 asset_groups = {
-    'BTC': ['IBIT', 'FBTC', 'GBTC'],  # Only top 3 most liquid BTC ETFs
+    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB'],
     'ETH': ['ETHA', 'FETH', 'ETHV', 'ETHE', 'YETH', 'EHY'],
     'SOL': ['BSOL', 'GSOL', 'SOL', 'SOLM', 'SOLC'],
     'XRP': ['GXRP', 'XRPZ', 'TOXR', 'XRP', 'XRPM'],
@@ -30,7 +30,7 @@ asset_groups = {
 }
 
 def get_covered_call_strategies(ticker: str):
-    for attempt in range(3):  # Retry up to 3 times with backoff
+    for attempt in range(3):
         try:
             etf = yf.Ticker(ticker)
             
@@ -86,6 +86,9 @@ def get_covered_call_strategies(ticker: str):
             strategies['premium_yield_pct'] = (strategies['premium'] / current_price) * 100
             strategies['downside_breakeven'] = current_price - strategies['premium']
             
+            # NEW: Replace NaN with 0 for JSON-safe serialization
+            strategies = strategies.fillna(0)
+            
             strategies = strategies[['strike', 'premium', 'impliedVolatility', 'openInterest', 'total_return_pct', 'premium_yield_pct', 'downside_breakeven']]
             
             strategies_list = strategies.to_dict(orient='records')
@@ -103,9 +106,9 @@ def get_covered_call_strategies(ticker: str):
             }
         
         except Exception as e:
-            if attempt == 2:  # Last attempt
+            if attempt == 2:
                 return {"error": f"Failed after retries: {str(e)}", "total_open_interest": 0}
-            time.sleep(5 * (attempt + 1))  # Backoff: 5s, 10s, 15s
+            time.sleep(5 * (attempt + 1))
 
 @lru_cache(maxsize=16)
 def cached_scan(asset: str):
@@ -115,10 +118,9 @@ def cached_scan(asset: str):
     
     results = {}
     for tick in tickers:
-        time.sleep(3)  # 3-second delay between tickers to avoid rate limit
+        time.sleep(3)  # Delay to avoid rate limit
         results[tick] = get_covered_call_strategies(tick)
     
-    # Sort by total_open_interest descending (highest OI first)
     sorted_results = dict(sorted(results.items(), key=lambda x: x[1].get('total_open_interest', 0), reverse=True))
     
     return sorted_results
