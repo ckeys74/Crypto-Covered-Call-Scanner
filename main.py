@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from functools import lru_cache
+import time  # Added for delay
 
 app = FastAPI(title="Crypto & AI Covered Call Scanner")
 
@@ -15,9 +16,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Asset groups (crypto and AI stocks)
+# Asset groups
 asset_groups = {
-    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB'],  # Reduced to top 5 BTC ETFs
+    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB'],  # Top 5 only
     'ETH': ['ETHA', 'FETH', 'ETHV', 'ETHE', 'YETH', 'EHY'],
     'SOL': ['BSOL', 'GSOL', 'SOL', 'SOLM', 'SOLC'],
     'XRP': ['GXRP', 'XRPZ', 'TOXR', 'XRP', 'XRPM'],
@@ -88,7 +89,6 @@ def get_covered_call_strategies(ticker: str):
         
         strategies_list = strategies.to_dict(orient='records')
         
-        # Total open interest for sorting
         total_oi = strategies['openInterest'].sum()
         
         return {
@@ -112,6 +112,7 @@ def cached_scan(asset: str):
     
     results = {}
     for tick in tickers:
+        time.sleep(2)  # 2-second delay between tickers to avoid rate limit
         results[tick] = get_covered_call_strategies(tick)
     
     # Sort by total_open_interest descending (highest OI first)
