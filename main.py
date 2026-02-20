@@ -17,7 +17,7 @@ app.add_middleware(
 
 # Asset groups (crypto and AI stocks)
 asset_groups = {
-    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB', 'HODL', 'EZBC', 'BTCW', 'YBTC', 'BTCI'],
+    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB'],  # Reduced to top 5 BTC ETFs
     'ETH': ['ETHA', 'FETH', 'ETHV', 'ETHE', 'YETH', 'EHY'],
     'SOL': ['BSOL', 'GSOL', 'SOL', 'SOLM', 'SOLC'],
     'XRP': ['GXRP', 'XRPZ', 'TOXR', 'XRP', 'XRPM'],
@@ -88,7 +88,7 @@ def get_covered_call_strategies(ticker: str):
         
         strategies_list = strategies.to_dict(orient='records')
         
-        # Calculate total open interest for sorting
+        # Total open interest for sorting
         total_oi = strategies['openInterest'].sum()
         
         return {
@@ -114,7 +114,7 @@ def cached_scan(asset: str):
     for tick in tickers:
         results[tick] = get_covered_call_strategies(tick)
     
-    # Sort the results by total_open_interest descending
+    # Sort by total_open_interest descending (highest OI first)
     sorted_results = dict(sorted(results.items(), key=lambda x: x[1].get('total_open_interest', 0), reverse=True))
     
     return sorted_results
