@@ -71,6 +71,7 @@ def get_covered_call_strategies(ticker: str):
                 "week52_low": week52_low,
                 "expiration": target_exp,
                 "strategies": [],
+                "total_open_interest": 0,
                 "message": "No calls with positive bid/last price."
             }
         
@@ -87,17 +88,21 @@ def get_covered_call_strategies(ticker: str):
         
         strategies_list = strategies.to_dict(orient='records')
         
+        # Calculate total open interest for sorting
+        total_oi = strategies['openInterest'].sum()
+        
         return {
             "ticker": ticker,
             "current_price": float(current_price),
             "week52_high": week52_high,
             "week52_low": week52_low,
             "expiration": target_exp,
-            "strategies": strategies_list
+            "strategies": strategies_list,
+            "total_open_interest": int(total_oi)
         }
     
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "total_open_interest": 0}
 
 @lru_cache(maxsize=16)
 def cached_scan(asset: str):
@@ -109,7 +114,10 @@ def cached_scan(asset: str):
     for tick in tickers:
         results[tick] = get_covered_call_strategies(tick)
     
-    return results
+    # Sort the results by total_open_interest descending
+    sorted_results = dict(sorted(results.items(), key=lambda x: x[1].get('total_open_interest', 0), reverse=True))
+    
+    return sorted_results
 
 @app.get("/scan/{asset}")
 def scan_asset(asset: str):
