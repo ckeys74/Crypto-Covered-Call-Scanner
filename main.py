@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from functools import lru_cache
-import time  # Added for delay
+import time
 
 app = FastAPI(title="Crypto & AI Covered Call Scanner")
 
@@ -16,9 +16,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Asset groups
 asset_groups = {
-    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB'],  # Top 5 only
+    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB'],
     'ETH': ['ETHA', 'FETH', 'ETHV', 'ETHE', 'YETH', 'EHY'],
     'SOL': ['BSOL', 'GSOL', 'SOL', 'SOLM', 'SOLC'],
     'XRP': ['GXRP', 'XRPZ', 'TOXR', 'XRP', 'XRPM'],
@@ -30,79 +29,82 @@ asset_groups = {
 }
 
 def get_covered_call_strategies(ticker: str):
-    try:
-        etf = yf.Ticker(ticker)
-        
-        hist_1d = etf.history(period='1d')
-        if hist_1d.empty:
-            return {"error": f"No recent price data for {ticker}."}
-        current_price = hist_1d['Close'].iloc[-1]
-        
-        hist_1y = etf.history(period='1y')
-        week52_high = hist_1y['High'].max() if not hist_1y.empty else None
-        week52_low = hist_1y['Low'].min() if not hist_1y.empty else None
-        
-        expirations = etf.options
-        if not expirations:
-            return {"error": f"No options data for {ticker}."}
-        
-        today = datetime.now()
-        target_exp = None
-        for exp in expirations:
-            exp_date = datetime.strptime(exp, '%Y-%m-%d')
-            days_to_exp = (exp_date - today).days
-            if 20 <= days_to_exp <= 40:
-                target_exp = exp
-                break
-        
-        if not target_exp:
-            return {"error": f"No monthly expiration (20–40 days) for {ticker}."}
-        
-        opt_chain = etf.option_chain(target_exp)
-        calls = opt_chain.calls
-        
-        calls['premium'] = calls['lastPrice'].fillna(calls['bid'])
-        calls = calls[calls['premium'] > 0].dropna(subset=['premium'])
-        
-        if calls.empty:
+    for attempt in range(3):  # Retry up to 3 times
+        try:
+            etf = yf.Ticker(ticker)
+            
+            hist_1d = etf.history(period='1d')
+            if hist_1d.empty:
+                raise ValueError(f"No price data for {ticker}")
+            current_price = hist_1d['Close'].iloc[-1]
+            
+            hist_1y = etf.history(period='1y')
+            week52_high = hist_1y['High'].max() if not hist_1y.empty else None
+            week52_low = hist_1y['Low'].min() if not hist_1y.empty else None
+            
+            expirations = etf.options
+            if not expirations:
+                raise ValueError(f"No options for {ticker}")
+            
+            today = datetime.now()
+            target_exp = None
+            for exp in expirations:
+                exp_date = datetime.strptime(exp, '%Y-%m-%d')
+                days = (exp_date - today).days
+                if 20 <= days <= 40:
+                    target_exp = exp
+                    break
+            
+            if not target_exp:
+                raise ValueError(f"No monthly expiration for {ticker}")
+            
+            opt_chain = etf.option_chain(target_exp)
+            calls = opt_chain.calls
+            
+            calls['premium'] = calls['lastPrice'].fillna(calls['bid'])
+            calls = calls[calls['premium'] > 0].dropna(subset=['premium'])
+            
+            if calls.empty:
+                return {
+                    "ticker": ticker,
+                    "current_price": float(current_price),
+                    "week52_high": week52_high,
+                    "week52_low": week52_low,
+                    "expiration": target_exp,
+                    "strategies": [],
+                    "total_open_interest": 0,
+                    "message": "No calls with positive bid/last price."
+                }
+            
+            itm_calls = calls[calls['strike'] < current_price].sort_values('strike', ascending=False).head(2)
+            otm_calls = calls[calls['strike'] > current_price].sort_values('strike', ascending=True).head(5)
+            
+            strategies = pd.concat([itm_calls, otm_calls])
+            strategies['cap_gain'] = strategies['strike'] - current_price
+            strategies['total_return_pct'] = ((strategies['premium'] + strategies['cap_gain']) / current_price) * 100
+            strategies['premium_yield_pct'] = (strategies['premium'] / current_price) * 100
+            strategies['downside_breakeven'] = current_price - strategies['premium']
+            
+            strategies = strategies[['strike', 'premium', 'impliedVolatility', 'openInterest', 'total_return_pct', 'premium_yield_pct', 'downside_breakeven']]
+            
+            strategies_list = strategies.to_dict(orient='records')
+            
+            total_oi = strategies['openInterest'].sum()
+            
             return {
                 "ticker": ticker,
                 "current_price": float(current_price),
                 "week52_high": week52_high,
                 "week52_low": week52_low,
                 "expiration": target_exp,
-                "strategies": [],
-                "total_open_interest": 0,
-                "message": "No calls with positive bid/last price."
+                "strategies": strategies_list,
+                "total_open_interest": int(total_oi)
             }
         
-        itm_calls = calls[calls['strike'] < current_price].sort_values('strike', ascending=False).head(2)
-        otm_calls = calls[calls['strike'] > current_price].sort_values('strike', ascending=True).head(5)
-        
-        strategies = pd.concat([itm_calls, otm_calls])
-        strategies['cap_gain'] = strategies['strike'] - current_price
-        strategies['total_return_pct'] = ((strategies['premium'] + strategies['cap_gain']) / current_price) * 100
-        strategies['premium_yield_pct'] = (strategies['premium'] / current_price) * 100
-        strategies['downside_breakeven'] = current_price - strategies['premium']
-        
-        strategies = strategies[['strike', 'premium', 'impliedVolatility', 'openInterest', 'total_return_pct', 'premium_yield_pct', 'downside_breakeven']]
-        
-        strategies_list = strategies.to_dict(orient='records')
-        
-        total_oi = strategies['openInterest'].sum()
-        
-        return {
-            "ticker": ticker,
-            "current_price": float(current_price),
-            "week52_high": week52_high,
-            "week52_low": week52_low,
-            "expiration": target_exp,
-            "strategies": strategies_list,
-            "total_open_interest": int(total_oi)
-        }
-    
-    except Exception as e:
-        return {"error": str(e), "total_open_interest": 0}
+        except Exception as e:
+            if attempt == 2:  # Last attempt
+                return {"error": f"Failed after retries: {str(e)}", "total_open_interest": 0}
+            time.sleep(5 * (attempt + 1))  # Exponential backoff: 5s, 10s, 15s
 
 @lru_cache(maxsize=16)
 def cached_scan(asset: str):
@@ -112,10 +114,10 @@ def cached_scan(asset: str):
     
     results = {}
     for tick in tickers:
-        time.sleep(2)  # 2-second delay between tickers to avoid rate limit
+        time.sleep(3)  # 3-second delay between tickers to avoid rate limit
         results[tick] = get_covered_call_strategies(tick)
     
-    # Sort by total_open_interest descending (highest OI first)
+    # Sort by total_open_interest descending
     sorted_results = dict(sorted(results.items(), key=lambda x: x[1].get('total_open_interest', 0), reverse=True))
     
     return sorted_results
