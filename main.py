@@ -1,6 +1,5 @@
 import yfinance as yf
 import pandas as pd
-import numpy as np
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +17,7 @@ app.add_middleware(
 )
 
 asset_groups = {
-    'BTC': ['IBIT', 'FBTC', 'GBTC', 'ARKB', 'BITB'],
+    'BTC': ['IBIT', 'FBTC'],  # Only top 2 to avoid rate limits
     'ETH': ['ETHA', 'FETH', 'ETHV', 'ETHE', 'YETH', 'EHY'],
     'SOL': ['BSOL', 'GSOL', 'SOL', 'SOLM', 'SOLC'],
     'XRP': ['GXRP', 'XRPZ', 'TOXR', 'XRP', 'XRPM'],
@@ -86,8 +85,7 @@ def get_covered_call_strategies(ticker: str):
             strategies['premium_yield_pct'] = (strategies['premium'] / current_price) * 100
             strategies['downside_breakeven'] = current_price - strategies['premium']
             
-            # NEW: Replace NaN with 0 for JSON-safe serialization
-            strategies = strategies.fillna(0)
+            strategies = strategies.fillna(0)  # Fix NaN for JSON
             
             strategies = strategies[['strike', 'premium', 'impliedVolatility', 'openInterest', 'total_return_pct', 'premium_yield_pct', 'downside_breakeven']]
             
@@ -118,7 +116,7 @@ def cached_scan(asset: str):
     
     results = {}
     for tick in tickers:
-        time.sleep(3)  # Delay to avoid rate limit
+        time.sleep(5)  # Increased to 5 seconds to avoid rate limit
         results[tick] = get_covered_call_strategies(tick)
     
     sorted_results = dict(sorted(results.items(), key=lambda x: x[1].get('total_open_interest', 0), reverse=True))
